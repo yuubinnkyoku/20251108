@@ -1,0 +1,355 @@
+import React, { useState, useEffect } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ScatterChart, Scatter } from 'recharts';
+
+const PolynomialRegression = () => {
+  const [results, setResults] = useState(null);
+  const [degree, setDegree] = useState(2);
+  const [useBias, setUseBias] = useState(false);
+  const [useLinear, setUseLinear] = useState(false);
+
+  // データ
+  const data = [
+    { id: 1, time: 0.6, distance: 0.7 },
+    { id: 2, time: 0.7, distance: 1.0 },
+    { id: 3, time: 0.8, distance: 1.3 },
+    { id: 4, time: 0.9, distance: 1.6 },
+    { id: 5, time: 1.0, distance: 2.0 },
+    { id: 6, time: 1.1, distance: 2.3 },
+    { id: 7, time: 1.2, distance: 2.9 },
+    { id: 8, time: 1.3, distance: 3.4 },
+    { id: 9, time: 1.4, distance: 3.9 },
+    { id: 10, time: 1.5, distance: 4.4 },
+    { id: 11, time: 1.6, distance: 5.1 },
+    { id: 12, time: 1.7, distance: 6.0 },
+    { id: 13, time: 1.8, distance: 6.6 },
+    { id: 14, time: 1.9, distance: 7.3 },
+    { id: 15, time: 2.0, distance: 7.9 },
+    { id: 16, time: 2.1, distance: 8.7 },
+    { id: 17, time: 2.2, distance: 9.6 },
+    { id: 18, time: 2.3, distance: 10.7 },
+    { id: 19, time: 2.4, distance: 11.9 },
+    { id: 20, time: 2.5, distance: 12.7 },
+    { id: 21, time: 2.6, distance: 13.9 }
+  ];
+
+  // 行列演算
+  const transpose = (matrix) => matrix[0].map((_, i) => matrix.map(row => row[i]));
+  
+  const multiply = (a, b) => {
+    const result = Array(a.length).fill(0).map(() => Array(b[0].length).fill(0));
+    for (let i = 0; i < a.length; i++) {
+      for (let j = 0; j < b[0].length; j++) {
+        for (let k = 0; k < b.length; k++) {
+          result[i][j] += a[i][k] * b[k][j];
+        }
+      }
+    }
+    return result;
+  };
+
+  const inverse = (matrix) => {
+    const n = matrix.length;
+    const augmented = matrix.map((row, i) => [...row, ...Array(n).fill(0).map((_, j) => i === j ? 1 : 0)]);
+    
+    for (let i = 0; i < n; i++) {
+      let maxRow = i;
+      for (let k = i + 1; k < n; k++) {
+        if (Math.abs(augmented[k][i]) > Math.abs(augmented[maxRow][i])) {
+          maxRow = k;
+        }
+      }
+      [augmented[i], augmented[maxRow]] = [augmented[maxRow], augmented[i]];
+      
+      const pivot = augmented[i][i];
+      for (let j = 0; j < 2 * n; j++) {
+        augmented[i][j] /= pivot;
+      }
+      
+      for (let k = 0; k < n; k++) {
+        if (k !== i) {
+          const factor = augmented[k][i];
+          for (let j = 0; j < 2 * n; j++) {
+            augmented[k][j] -= factor * augmented[i][j];
+          }
+        }
+      }
+    }
+    
+    return augmented.map(row => row.slice(n));
+  };
+
+  const performRegression = () => {
+    // 設計行列Xを作成
+    const X = data.map(d => {
+      const row = [];
+      if (useBias) row.push(1); // バイアス項（切片）
+      for (let i = 1; i <= degree; i++) {
+        if (i === 1 && !useLinear) continue; // 1次項をスキップ
+        row.push(Math.pow(d.time, i));
+      }
+      return row;
+    });
+
+    // 目的変数y
+    const y = data.map(d => [d.distance]);
+
+    // 正規方程式: β = (X'X)^(-1)X'y
+    const Xt = transpose(X);
+    const XtX = multiply(Xt, X);
+    const XtX_inv = inverse(XtX);
+    const Xty = multiply(Xt, y);
+    const beta = multiply(XtX_inv, Xty);
+
+    // 予測値と残差
+    const predictions = X.map(row => 
+      row.reduce((sum, val, i) => sum + val * beta[i][0], 0)
+    );
+
+    const residuals = data.map((d, i) => d.distance - predictions[i]);
+    const SSR = residuals.reduce((sum, r) => sum + r * r, 0);
+    const yMean = data.reduce((sum, d) => sum + d.distance, 0) / data.length;
+    const SST = data.reduce((sum, d) => sum + Math.pow(d.distance - yMean, 0), 0);
+    const R2 = 1 - (SSR / SST);
+
+    // グラフ用データ（拡張）
+    const chartData = [];
+    for (let t = 0.5; t <= 3.5; t += 0.05) {
+      const row = [];
+      if (useBias) row.push(1);
+      for (let i = 1; i <= degree; i++) {
+        if (i === 1 && !useLinear) continue;
+        row.push(Math.pow(t, i));
+      }
+      const pred = row.reduce((sum, val, i) => sum + val * beta[i][0], 0);
+      chartData.push({ time: t, predicted: pred });
+    }
+    
+    // 実測値を追加
+    data.forEach((d, i) => {
+      const nearest = chartData.find(cd => Math.abs(cd.time - d.time) < 0.025);
+      if (nearest) {
+        nearest.actual = d.distance;
+      }
+    });
+
+    // 距離が16√2になる時間を計算
+    const target = 16 * Math.sqrt(2);
+    let timeAt16Root2 = null;
+    for (let t = 0.5; t <= 5; t += 0.001) {
+      const row = [];
+      if (useBias) row.push(1);
+      for (let i = 1; i <= degree; i++) {
+        if (i === 1 && !useLinear) continue;
+        row.push(Math.pow(t, i));
+      }
+      const dist = row.reduce((sum, val, i) => sum + val * beta[i][0], 0);
+      if (Math.abs(dist - target) < 0.01) {
+        timeAt16Root2 = t;
+        break;
+      }
+    }
+
+    // 傾きが155/9になる時間を計算（微分）
+    const targetSlope = 155 / 9;
+    let timeAtSlope = null;
+    for (let t = 0.5; t <= 5; t += 0.001) {
+      let slope = 0;
+      let betaIdx = 0;
+      if (useBias) betaIdx++;
+      
+      for (let i = 1; i <= degree; i++) {
+        if (i === 1 && !useLinear) continue;
+        slope += i * beta[betaIdx][0] * Math.pow(t, i - 1);
+        betaIdx++;
+      }
+      if (Math.abs(slope - targetSlope) < 0.01) {
+        timeAtSlope = t;
+        break;
+      }
+    }
+
+    setResults({
+      coefficients: beta.map(b => b[0]),
+      R2,
+      chartData,
+      predictions,
+      residuals,
+      timeAt16Root2,
+      timeAtSlope,
+      target16Root2: target,
+      targetSlope,
+      useBias,
+      useLinear
+    });
+  };
+
+  useEffect(() => {
+    performRegression();
+  }, [degree, useBias, useLinear]);
+
+  if (!results) return <div className="p-4">計算中...</div>;
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto">
+      <h1 className="text-3xl font-bold mb-6">多項式重回帰分析</h1>
+      
+      <div className="mb-6 p-4 bg-gray-50 rounded">
+        <label className="block mb-2 font-semibold">多項式の次数:</label>
+        <input 
+          type="range" 
+          min="1" 
+          max="5" 
+          value={degree} 
+          onChange={(e) => setDegree(parseInt(e.target.value))}
+          className="w-full"
+        />
+        <div className="text-center font-bold text-xl mt-2">{degree}次</div>
+      </div>
+
+      <div className="mb-6 p-4 bg-gray-50 rounded flex items-center justify-center gap-8">
+        <label className="flex items-center gap-3 cursor-pointer">
+          <span className="font-semibold text-lg">バイアス項（切片）:</span>
+          <div className="relative inline-block w-14 h-8">
+            <input 
+              type="checkbox" 
+              checked={useBias}
+              onChange={(e) => setUseBias(e.target.checked)}
+              className="opacity-0 w-0 h-0"
+            />
+            <span className={`absolute cursor-pointer top-0 left-0 right-0 bottom-0 rounded-full transition-colors duration-300 ${useBias ? 'bg-blue-600' : 'bg-gray-300'}`}>
+              <span className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 ${useBias ? 'transform translate-x-6' : ''}`}></span>
+            </span>
+          </div>
+          <span className="font-bold text-lg">{useBias ? 'あり' : 'なし'}</span>
+        </label>
+
+        <label className="flex items-center gap-3 cursor-pointer">
+          <span className="font-semibold text-lg">1次の項:</span>
+          <div className="relative inline-block w-14 h-8">
+            <input 
+              type="checkbox" 
+              checked={useLinear}
+              onChange={(e) => setUseLinear(e.target.checked)}
+              className="opacity-0 w-0 h-0"
+            />
+            <span className={`absolute cursor-pointer top-0 left-0 right-0 bottom-0 rounded-full transition-colors duration-300 ${useLinear ? 'bg-green-600' : 'bg-gray-300'}`}>
+              <span className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 ${useLinear ? 'transform translate-x-6' : ''}`}></span>
+            </span>
+          </div>
+          <span className="font-bold text-lg">{useLinear ? 'あり' : 'なし'}</span>
+        </label>
+      </div>
+
+      <div className="mb-6 p-4 bg-blue-50 rounded">
+        <h2 className="text-xl font-bold mb-3">回帰式</h2>
+        <div className="text-lg font-mono">
+          距離 = {results.useBias ? results.coefficients[0].toFixed(4) : '0'}
+          {(() => {
+            let betaIdx = results.useBias ? 1 : 0;
+            const terms = [];
+            for (let i = 1; i <= degree; i++) {
+              if (i === 1 && !results.useLinear) continue;
+              const coef = results.coefficients[betaIdx];
+              terms.push(` ${coef >= 0 ? '+' : ''} ${coef.toFixed(4)} × 時間${i > 1 ? `^${i}` : ''}`);
+              betaIdx++;
+            }
+            return terms.join('');
+          })()}
+        </div>
+        <div className="mt-3 text-lg">
+          <strong>決定係数 R² = {results.R2.toFixed(4)}</strong>
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <h2 className="text-xl font-bold mb-3">実測値 vs 予測値</h2>
+        <LineChart width={900} height={500} data={results.chartData}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="time" label={{ value: '時間(s)', position: 'insideBottom', offset: -5 }} domain={[0.5, 3.5]} />
+          <YAxis label={{ value: '距離(m)', angle: -90, position: 'insideLeft' }} domain={[0, 25]} />
+          <Tooltip />
+          <Legend />
+          <Scatter name="実測値" data={results.chartData.filter(d => d.actual).map(d => ({ time: d.time, value: d.actual }))} fill="#8884d8" dataKey="value" />
+          <Line name="予測値" type="monotone" dataKey="predicted" stroke="#ff7300" strokeWidth={2} dot={false} />
+        </LineChart>
+      </div>
+
+      <div className="grid grid-cols-2 gap-6 mb-6">
+        <div className="p-6 bg-green-100 rounded-lg border-4 border-green-600">
+          <h2 className="text-2xl font-bold mb-4 text-green-800">距離 = 16√2 m の時</h2>
+          {results.timeAt16Root2 ? (
+            <>
+              <div className="text-6xl font-bold text-green-900 mb-2">
+                {results.timeAt16Root2.toFixed(3)} 秒
+              </div>
+              <div className="text-lg text-green-700">
+                16√2 ≈ {results.target16Root2.toFixed(3)} m
+              </div>
+            </>
+          ) : (
+            <div className="text-2xl text-red-600">範囲外</div>
+          )}
+        </div>
+
+        <div className="p-6 bg-purple-100 rounded-lg border-4 border-purple-600">
+          <h2 className="text-2xl font-bold mb-4 text-purple-800">傾き = 155/9 の時</h2>
+          {results.timeAtSlope ? (
+            <>
+              <div className="text-6xl font-bold text-purple-900 mb-2">
+                {results.timeAtSlope.toFixed(3)} 秒
+              </div>
+              <div className="text-lg text-purple-700">
+                155/9 ≈ {results.targetSlope.toFixed(3)} m/s
+              </div>
+            </>
+          ) : (
+            <div className="text-2xl text-red-600">範囲外</div>
+          )}
+        </div>
+      </div>
+
+      <div className="mb-6 p-6 bg-yellow-100 rounded-lg border-4 border-yellow-600">
+        <h2 className="text-2xl font-bold mb-4 text-yellow-800">16m, 62km/h から導出した理論値</h2>
+        <div className="text-center">
+          <div className="text-5xl font-bold text-yellow-900 mb-2">
+            (228√2)/155 秒
+          </div>
+          <div className="text-4xl font-bold text-yellow-800 mb-3">
+            ≈ 2.62770003847 秒
+          </div>
+          <div className="text-lg text-yellow-700 mt-4">
+            16m の距離を 62km/h (≈17.222 m/s) で通過する時間
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <h2 className="text-xl font-bold mb-3">詳細データ</h2>
+        <div className="overflow-x-auto">
+          <table className="min-w-full border-collapse border border-gray-300">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="border border-gray-300 px-4 py-2">時間(s)</th>
+                <th className="border border-gray-300 px-4 py-2">実測距離(m)</th>
+                <th className="border border-gray-300 px-4 py-2">予測距離(m)</th>
+                <th className="border border-gray-300 px-4 py-2">残差(m)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((d, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  <td className="border border-gray-300 px-4 py-2 text-center">{d.time}</td>
+                  <td className="border border-gray-300 px-4 py-2 text-center">{d.distance}</td>
+                  <td className="border border-gray-300 px-4 py-2 text-center">{results.predictions[i].toFixed(3)}</td>
+                  <td className="border border-gray-300 px-4 py-2 text-center">{results.residuals[i].toFixed(3)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default PolynomialRegression;
